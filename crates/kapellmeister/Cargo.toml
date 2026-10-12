@@ -8,8 +8,12 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+kapella-runtime-dir.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 display-error-chain.workspace = true
+bytemuck.workspace = true
+waywe_daemonize = "0.5.0"
+defer = "0.2.1"
