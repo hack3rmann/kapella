@@ -1,11 +1,14 @@
 use cbor2::async_io::tokio::read_value;
+use clap::Parser;
 use defer::defer;
 use display_error_chain::ErrorChainExt as _;
 use kapella_job_info::KapellaJob;
 use kapella_runtime_dir::runtime_dir;
 use std::{
+    env,
     fs::{self, File},
     io::ErrorKind,
+    path::{Path, PathBuf},
 };
 use tokio::{
     io,
@@ -18,6 +21,39 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use waywe_daemonize::Daemonize;
+
+fn get_default_config_path() -> PathBuf {
+    const KAPELLA: &str = "kapella";
+
+    let xdg = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    let home = env::home_dir().map(|mut home| {
+        home.push(".config");
+        home
+    });
+    let etc = Path::new("/etc");
+
+    let paths = [xdg.as_deref(), home.as_deref(), Some(etc)];
+    let mut current_path = PathBuf::new();
+
+    for path in paths.into_iter().flatten() {
+        current_path.clear();
+        current_path.extend([path, Path::new(KAPELLA)]);
+
+        if current_path.exists() && current_path.is_dir() {
+            return current_path;
+        }
+    }
+
+    PathBuf::from("/etc/capella")
+}
+
+/// Distributed computation orchestrator
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(long, default_value_os_t = get_default_config_path())]
+    pub config: PathBuf,
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -33,8 +69,9 @@ fn main() {
 }
 
 async fn start() {
-    let cancel = CancellationToken::new();
+    let _args = Args::parse();
 
+    let cancel = CancellationToken::new();
     let main = tokio::spawn(listen_ipc(cancel.clone()));
 
     if let Err(error) = wait_main(cancel, main).await {
