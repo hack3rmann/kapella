@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/kapella-job-info",
     "crates/kapella-runtime-dir",
     "crates/kapellmeister",
     "crates/musikant",
@@ -16,9 +17,12 @@ repository = "https://github.com/hack3rmann/kapella.git"
 
 [workspace.dependencies]
 kapella-runtime-dir = { path = "crates/kapella-runtime-dir" }
+kapella-job-info = { path = "crates/kapella-job-info" }
 tokio = { version = "1.53.2", features = ["full"] }
 tokio-util = { version = "0.7.20", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 display-error-chain = "0.2.2"
 bytemuck = { version = "1.25.2", features = ["extern_crate_alloc"] }
+serde = { version = "1.0.229", features = ["derive"] }
+cbor2 = { version = "1.1.6", features = ["tokio"] }

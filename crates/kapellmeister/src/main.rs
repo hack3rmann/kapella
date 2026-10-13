@@ -1,11 +1,15 @@
-use bytemuck::allocation;
+use cbor2::async_io::tokio::read_value;
 use defer::defer;
 use display_error_chain::ErrorChainExt as _;
+use kapella_job_info::KapellaJob;
 use kapella_runtime_dir::runtime_dir;
-use std::{fs::{self, File}, io::ErrorKind};
+use std::{
+    fs::{self, File},
+    io::ErrorKind,
+};
 use tokio::{
-    io::{self, AsyncReadExt as _},
-    net::UnixListener,
+    io,
+    net::{UnixListener, UnixStream},
     runtime::Builder as RuntimeBuilder,
     select,
     signal::unix::SignalKind,
@@ -23,7 +27,7 @@ fn main() {
     let runtime = RuntimeBuilder::new_multi_thread()
         .enable_all()
         .build()
-        .unwrap();
+        .unwrap_or_else(|err| panic!("failed to build tokio runtime: {}", err.chain()));
 
     runtime.block_on(start());
 }
@@ -39,7 +43,7 @@ async fn start() {
 }
 
 async fn listen_ipc(cancel: CancellationToken) -> io::Result<()> {
-    let mut set = JoinSet::new();
+    let mut set = JoinSet::<Result<(), cbor2::de::Error>>::new();
 
     let sock_path = runtime_dir().join("ipc.sock");
     let listener = loop {
@@ -57,42 +61,60 @@ async fn listen_ipc(cancel: CancellationToken) -> io::Result<()> {
 
     defer!({
         info!(path = %sock_path.display(), "removing socket file");
-        _ = std::fs::remove_file(&sock_path);
+
+        if let Err(error) = std::fs::remove_file(&sock_path) {
+            error!(error = %error.chain(), path = %sock_path.display(), "cannot remove socket file");
+        }
     });
 
     loop {
-        let (mut stream, addr) = select! {
+        let (stream, addr) = select! {
             result = listener.accept() => result?,
             _ = cancel.cancelled() => break,
+            Some(result) = set.join_next() => {
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => error!(error = %error.chain(), "job failed"),
+                    Err(error) => error!(error = %error.chain(), "ipc task panicked"),
+                }
+                continue
+            }
         };
 
         info!(?addr, "new ipc connection");
 
-        let cancel = cancel.child_token();
-        set.spawn(async move {
-            let mut buf = allocation::zeroed_slice_box::<u8>(4096);
-
-            let result = select! {
-                _ = cancel.cancelled() => return,
-                result = stream.read(&mut buf) => result,
-            };
-
-            match result {
-                Ok(0) => {}
-                Ok(len) => {
-                    let text = str::from_utf8(&buf[..len]).unwrap();
-                    info!(text, "request");
-                }
-                Err(error) => error!(error = %error.chain(), "failed to read from IPC socket"),
-            }
-        });
+        set.spawn(handle_ipc(cancel.child_token(), stream));
     }
 
     while let Some(result) = set.join_next().await {
-        result.unwrap();
+        if let Err(error) = result {
+            error!(error = %error.chain(), "ipc task panicked");
+        }
     }
 
     Ok(())
+}
+
+async fn handle_ipc(
+    cancel: CancellationToken,
+    mut stream: UnixStream,
+) -> Result<(), cbor2::de::Error> {
+    loop {
+        let result = select! {
+            _ = cancel.cancelled() => return Ok(()),
+            result = read_value::<KapellaJob, _>(&mut stream) => result,
+        };
+
+        let job = match result {
+            Ok(job) => job,
+            Err(cbor2::de::Error::Io(error)) if error.kind() == ErrorKind::UnexpectedEof => {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+
+        info!(?job, "job");
+    }
 }
 
 async fn wait_main<T>(cancel: CancellationToken, mut join: JoinHandle<T>) -> Result<T, JoinError> {
