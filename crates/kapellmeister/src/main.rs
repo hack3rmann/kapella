@@ -1,51 +1,24 @@
-use cbor2::async_io::tokio::read_value;
+pub mod config;
+pub mod ipc;
+pub mod music;
+
+use crate::config::get_default_config_path;
 use clap::Parser;
-use defer::defer;
 use display_error_chain::ErrorChainExt as _;
-use kapella_job_info::KapellaJob;
 use kapella_runtime_dir::runtime_dir;
 use std::{
-    env,
     fs::{self, File},
-    io::ErrorKind,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 use tokio::{
-    io,
-    net::{UnixListener, UnixStream},
-    runtime::Builder as RuntimeBuilder,
-    select,
+    io, select,
     signal::unix::SignalKind,
-    task::{JoinError, JoinHandle, JoinSet},
+    task::{JoinError, JoinHandle},
+    try_join,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use waywe_daemonize::Daemonize;
-
-fn get_default_config_path() -> PathBuf {
-    const KAPELLA: &str = "kapella";
-
-    let xdg = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
-    let home = env::home_dir().map(|mut home| {
-        home.push(".config");
-        home
-    });
-    let etc = Path::new("/etc");
-
-    let paths = [xdg.as_deref(), home.as_deref(), Some(etc)];
-    let mut current_path = PathBuf::new();
-
-    for path in paths.into_iter().flatten() {
-        current_path.clear();
-        current_path.extend([path, Path::new(KAPELLA)]);
-
-        if current_path.exists() && current_path.is_dir() {
-            return current_path;
-        }
-    }
-
-    PathBuf::from("/etc/capella")
-}
 
 /// Distributed computation orchestrator
 #[derive(Parser, Debug)]
@@ -60,98 +33,29 @@ fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    let runtime = RuntimeBuilder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap_or_else(|err| panic!("failed to build tokio runtime: {}", err.chain()));
+    // _detach();
 
-    runtime.block_on(start());
+    start();
 }
 
+#[tokio::main]
 async fn start() {
     let _args = Args::parse();
 
     let cancel = CancellationToken::new();
-    let main = tokio::spawn(listen_ipc(cancel.clone()));
+    let main = tokio::spawn(listen(cancel.clone()));
 
     if let Err(error) = wait_main(cancel, main).await {
         error!(error = %error.chain(), "main task failed");
     }
 }
 
-async fn listen_ipc(cancel: CancellationToken) -> io::Result<()> {
-    let mut set = JoinSet::<Result<(), cbor2::de::Error>>::new();
-
-    let sock_path = runtime_dir().join("ipc.sock");
-    let listener = loop {
-        match UnixListener::bind(&sock_path) {
-            Ok(listener) => break listener,
-            Err(err) if err.kind() == ErrorKind::AddrInUse => {
-                warn!(path = %sock_path.display(), "removing socket file");
-                tokio::fs::remove_file(&sock_path).await?;
-            }
-            Err(error) => return Err(error),
-        }
-    };
-
-    info!(path = %sock_path.display(), "listening on ipc socket");
-
-    defer!({
-        info!(path = %sock_path.display(), "removing socket file");
-
-        if let Err(error) = std::fs::remove_file(&sock_path) {
-            error!(error = %error.chain(), path = %sock_path.display(), "cannot remove socket file");
-        }
-    });
-
-    loop {
-        let (stream, addr) = select! {
-            result = listener.accept() => result?,
-            _ = cancel.cancelled() => break,
-            Some(result) = set.join_next() => {
-                match result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => error!(error = %error.chain(), "job failed"),
-                    Err(error) => error!(error = %error.chain(), "ipc task panicked"),
-                }
-                continue
-            }
-        };
-
-        info!(?addr, "new ipc connection");
-
-        set.spawn(handle_ipc(cancel.child_token(), stream));
-    }
-
-    while let Some(result) = set.join_next().await {
-        if let Err(error) = result {
-            error!(error = %error.chain(), "ipc task panicked");
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_ipc(
-    cancel: CancellationToken,
-    mut stream: UnixStream,
-) -> Result<(), cbor2::de::Error> {
-    loop {
-        let result = select! {
-            _ = cancel.cancelled() => return Ok(()),
-            result = read_value::<KapellaJob, _>(&mut stream) => result,
-        };
-
-        let job = match result {
-            Ok(job) => job,
-            Err(cbor2::de::Error::Io(error)) if error.kind() == ErrorKind::UnexpectedEof => {
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        };
-
-        info!(?job, "job");
-    }
+async fn listen(cancel: CancellationToken) -> io::Result<()> {
+    try_join!(
+        music::listen(cancel.child_token()),
+        ipc::listen(cancel.child_token()),
+    )
+    .map(|_| ())
 }
 
 async fn wait_main<T>(cancel: CancellationToken, mut join: JoinHandle<T>) -> Result<T, JoinError> {
