@@ -1,6 +1,7 @@
-use cbor2::async_io::tokio::read_value;
+use cbor2::async_io::tokio::write_value;
 use display_error_chain::ErrorChainExt as _;
-use kapella_job_info::KapellaJob;
+use flume::Receiver;
+use kapella_job_info::{BashCommand, KapellaJob};
 use std::io::ErrorKind;
 use tokio::{
     io,
@@ -11,13 +12,43 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+fn send_jobs(
+    cancel: CancellationToken,
+    set: &mut JoinSet<Result<(), cbor2::ser::Error>>,
+) -> Receiver<KapellaJob> {
+    let (jobs, result) = flume::bounded(0);
+
+    set.spawn(async move {
+        for i in 0_usize.. {
+            let job = KapellaJob {
+                command: BashCommand(format!("echo 'Hello from job #{i}'")),
+            };
+
+            select! {
+                _ = cancel.cancelled() => break,
+                result = jobs.send_async(job) => {
+                    if result.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    });
+
+    result
+}
+
 pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
     const ADDR: &str = "127.0.0.1:4700";
 
-    let mut set = JoinSet::<Result<(), cbor2::de::Error>>::new();
+    let mut set = JoinSet::<Result<(), cbor2::ser::Error>>::new();
     let listener = TcpListener::bind(ADDR).await?;
 
     info!(address = ADDR, "listening music on");
+
+    let jobs = send_jobs(cancel.child_token(), &mut set);
 
     loop {
         let (stream, addr) = select! {
@@ -29,13 +60,13 @@ pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
                     Ok(Err(error)) => error!(error = %error.chain(), "job failed"),
                     Err(error) => error!(error = %error.chain(), "ipc task panicked"),
                 }
-                continue
+                continue;
             }
         };
 
         info!(?addr, "musikant connected");
 
-        set.spawn(handle_music(cancel.child_token(), stream));
+        set.spawn(handle_music(jobs.clone(), cancel.child_token(), stream));
     }
 
     while let Some(result) = set.join_next().await {
@@ -48,23 +79,24 @@ pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
 }
 
 async fn handle_music(
+    jobs: Receiver<KapellaJob>,
     cancel: CancellationToken,
     mut stream: TcpStream,
-) -> Result<(), cbor2::de::Error> {
-    loop {
+) -> Result<(), cbor2::ser::Error> {
+    while let Ok(job) = jobs.recv_async().await {
         let result = select! {
             _ = cancel.cancelled() => return Ok(()),
-            result = read_value::<KapellaJob, _>(&mut stream) => result,
+            result = write_value(&mut stream, &job) => result,
         };
 
-        let job = match result {
-            Ok(job) => job,
-            Err(cbor2::de::Error::Io(error)) if error.kind() == ErrorKind::UnexpectedEof => {
+        match result {
+            Ok(()) => {}
+            Err(cbor2::ser::Error::Io(error)) if error.kind() == ErrorKind::ConnectionReset => {
                 return Ok(());
             }
             Err(error) => return Err(error),
-        };
-
-        info!(?job, "job");
+        }
     }
+
+    Ok(())
 }

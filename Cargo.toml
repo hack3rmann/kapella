@@ -11,7 +11,7 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-rust-version = "1.95"
+rust-version = "1.99"
 authors = ["Varov Svyatoslav <slava-varov3@mail.ru>"]
 repository = "https://github.com/hack3rmann/kapella.git"
 

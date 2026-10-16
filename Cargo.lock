@@ -484,10 +484,12 @@ name = "musikant"
 version = "0.1.0"
 dependencies = [
  "cbor2",
+ "display-error-chain",
  "kapella-job-info",
  "kapella-runtime-dir",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

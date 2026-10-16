@@ -39,6 +39,5 @@ pub enum SetupStep {
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct KapellaJob {
-    pub setup_steps: Vec<SetupStep>,
     pub command: BashCommand,
 }
