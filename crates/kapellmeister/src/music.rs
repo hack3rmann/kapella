@@ -2,7 +2,10 @@ use cbor2::async_io::tokio::write_value;
 use display_error_chain::ErrorChainExt as _;
 use flume::Receiver;
 use kapella_job_info::{BashCommand, KapellaJob};
-use std::io::ErrorKind;
+use std::{
+    io::ErrorKind,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+};
 use tokio::{
     io,
     net::{TcpListener, TcpStream},
@@ -41,12 +44,12 @@ fn send_jobs(
 }
 
 pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
-    const ADDR: &str = "127.0.0.1:4700";
+    const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 4700));
 
     let mut set = JoinSet::<Result<(), cbor2::ser::Error>>::new();
     let listener = TcpListener::bind(ADDR).await?;
 
-    info!(address = ADDR, "listening music on");
+    info!(address = ?ADDR, "listening music on");
 
     let jobs = send_jobs(cancel.child_token(), &mut set);
 
@@ -83,7 +86,17 @@ async fn handle_music(
     cancel: CancellationToken,
     mut stream: TcpStream,
 ) -> Result<(), cbor2::ser::Error> {
-    while let Ok(job) = jobs.recv_async().await {
+    loop {
+        let job = select! {
+            _ = cancel.cancelled() => break,
+            result = jobs.recv_async() => {
+                match result {
+                    Ok(job) => job,
+                    Err(_) => break,
+                }
+            }
+        };
+
         let result = select! {
             _ = cancel.cancelled() => return Ok(()),
             result = write_value(&mut stream, &job) => result,
