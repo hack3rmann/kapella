@@ -11,6 +11,7 @@ repository.workspace = true
 kapella-runtime-dir.workspace = true
 kapella-job-info.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 cbor2.workspace = true

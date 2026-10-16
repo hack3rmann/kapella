@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = [
+members = ["crates/kapella",
     "crates/kapella-job-info",
     "crates/kapella-runtime-dir",
     "crates/kapellmeister",

@@ -5,6 +5,7 @@ pub mod music;
 use crate::config::get_default_config_path;
 use clap::Parser;
 use display_error_chain::ErrorChainExt as _;
+use kapella_job_info::BashCommand;
 use kapella_runtime_dir::runtime_dir;
 use std::{
     fs::{self, File},
@@ -51,9 +52,11 @@ async fn start() {
 }
 
 async fn listen(cancel: CancellationToken) -> io::Result<()> {
+    let (commands_sender, commands_receiver) = flume::bounded::<BashCommand>(0);
+
     try_join!(
-        music::listen(cancel.child_token()),
-        ipc::listen(cancel.child_token()),
+        music::listen(cancel.child_token(), commands_receiver),
+        ipc::listen(cancel.child_token(), commands_sender),
     )
     .map(|_| ())
 }

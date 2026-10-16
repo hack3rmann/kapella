@@ -1,0 +1,18 @@
+[package]
+name = "kapella"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+kapella-runtime-dir.workspace = true
+kapella-job-info.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+cbor2.workspace = true

@@ -395,6 +395,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kapella"
+version = "0.1.0"
+dependencies = [
+ "cbor2",
+ "clap",
+ "kapella-job-info",
+ "kapella-runtime-dir",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "kapella-job-info"
 version = "0.1.0"
 dependencies = [
@@ -488,6 +502,7 @@ dependencies = [
  "kapella-job-info",
  "kapella-runtime-dir",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]

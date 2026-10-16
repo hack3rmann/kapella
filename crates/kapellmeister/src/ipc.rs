@@ -1,7 +1,8 @@
 use cbor2::async_io::tokio::read_value;
 use defer::defer;
 use display_error_chain::ErrorChainExt as _;
-use kapella_job_info::KapellaJob;
+use flume::Sender;
+use kapella_job_info::BashCommand;
 use kapella_runtime_dir::runtime_dir;
 use std::io::ErrorKind;
 use tokio::{
@@ -13,7 +14,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
+pub async fn listen(cancel: CancellationToken, commands: Sender<BashCommand>) -> io::Result<()> {
     let mut set = JoinSet::<Result<(), cbor2::de::Error>>::new();
 
     let sock_path = runtime_dir().join("ipc.sock");
@@ -54,7 +55,7 @@ pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
 
         info!(?addr, "new ipc connection");
 
-        set.spawn(handle_ipc(cancel.child_token(), stream));
+        set.spawn(handle_ipc(cancel.child_token(), stream, commands.clone()));
     }
 
     while let Some(result) = set.join_next().await {
@@ -69,14 +70,15 @@ pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
 async fn handle_ipc(
     cancel: CancellationToken,
     mut stream: UnixStream,
+    commands: Sender<BashCommand>,
 ) -> Result<(), cbor2::de::Error> {
     loop {
         let result = select! {
             _ = cancel.cancelled() => return Ok(()),
-            result = read_value::<KapellaJob, _>(&mut stream) => result,
+            result = read_value::<BashCommand, _>(&mut stream) => result,
         };
 
-        let job = match result {
+        let command = match result {
             Ok(job) => job,
             Err(cbor2::de::Error::Io(error)) if error.kind() == ErrorKind::UnexpectedEof => {
                 return Ok(());
@@ -84,6 +86,13 @@ async fn handle_ipc(
             Err(error) => return Err(error),
         };
 
-        info!(?job, "job");
+        select! {
+            _ = cancel.cancelled() => return Ok(()),
+            result = commands.send_async(command) => {
+                if result.is_err() {
+                    return Ok(())
+                }
+            }
+        }
     }
 }

@@ -1,7 +1,7 @@
-use cbor2::async_io::tokio::write_value;
+use cbor2::async_io::tokio::{read_value, write_value};
 use display_error_chain::ErrorChainExt as _;
 use flume::Receiver;
-use kapella_job_info::{BashCommand, KapellaJob};
+use kapella_job_info::{BashCommand, KapellaJob, KapellaJobId, KapellaJobResult};
 use std::{
     io::ErrorKind,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -18,32 +18,46 @@ use tracing::{error, info};
 fn send_jobs(
     cancel: CancellationToken,
     set: &mut JoinSet<Result<(), cbor2::ser::Error>>,
+    commands: Receiver<BashCommand>,
 ) -> Receiver<KapellaJob> {
     let (jobs, result) = flume::bounded(0);
 
     set.spawn(async move {
-        for i in 0_usize.. {
+        let mut next_id = u64::MAX;
+
+        loop {
+            next_id = next_id.wrapping_add(1);
+
+            let command = select! {
+                _ = cancel.cancelled() => return Ok(()),
+                result = commands.recv_async() => {
+                    match result {
+                        Ok(command) => command,
+                        Err(_) => return Ok(()),
+                    }
+                }
+            };
+
             let job = KapellaJob {
-                command: BashCommand(format!("echo 'Hello from job #{i}'")),
+                id: KapellaJobId::new(next_id),
+                command,
             };
 
             select! {
-                _ = cancel.cancelled() => break,
+                _ = cancel.cancelled() => return Ok(()),
                 result = jobs.send_async(job) => {
                     if result.is_err() {
-                        break;
+                        return Ok(());
                     }
                 }
             }
         }
-
-        Ok(())
     });
 
     result
 }
 
-pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
+pub async fn listen(cancel: CancellationToken, commands: Receiver<BashCommand>) -> io::Result<()> {
     const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 4700));
 
     let mut set = JoinSet::<Result<(), cbor2::ser::Error>>::new();
@@ -51,7 +65,7 @@ pub async fn listen(cancel: CancellationToken) -> io::Result<()> {
 
     info!(address = ?ADDR, "listening music on");
 
-    let jobs = send_jobs(cancel.child_token(), &mut set);
+    let jobs = send_jobs(cancel.child_token(), &mut set, commands);
 
     loop {
         let (stream, addr) = select! {
@@ -109,6 +123,23 @@ async fn handle_music(
             }
             Err(error) => return Err(error),
         }
+
+        let result = select! {
+            _ = cancel.cancelled() => return Ok(()),
+            result = read_value::<KapellaJobResult, _>(&mut stream) => result,
+        };
+
+        let result = match result {
+            Ok(result) => result,
+            Err(cbor2::de::Error::Io(error)) if error.kind() == ErrorKind::ConnectionReset => {
+                return Ok(());
+            }
+            Err(error) => panic!("{}", error.chain()),
+        };
+
+        let stdout = String::from_utf8_lossy_owned(result.stdout);
+
+        info!(?stdout);
     }
 
     Ok(())

@@ -37,7 +37,25 @@ pub enum SetupStep {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct KapellaJobId(u64);
+
+impl KapellaJobId {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct KapellaJob {
+    pub id: KapellaJobId,
     pub command: BashCommand,
+}
+
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct KapellaJobResult {
+    pub id: KapellaJobId,
+    pub exit_code: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
