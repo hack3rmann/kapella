@@ -1,0 +1,10 @@
+id = "mvp-text"
+
+[env]
+id = "mvp-text"
+setup = "setup.bash"
+
+[job]
+command = '"$KAPELLA_ENV/bin/process.sh" "$KAPELLA_ITEM"'
+dataset = ["data/*.txt"]
+outputs = ["output.txt"]

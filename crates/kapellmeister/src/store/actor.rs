@@ -56,7 +56,7 @@ where
 pub enum StoreCmd {
     StartJob {
         corr: u64,
-        toml_path: PathBuf,
+        job_dir: PathBuf,
     },
     AddPatterns {
         corr: u64,
@@ -181,8 +181,8 @@ async fn handle_cmd(
     cancel: CancellationToken,
 ) {
     match cmd {
-        StoreCmd::StartJob { corr, toml_path } => {
-            let result = start_job(store, toml_path, cancel.child_token()).await;
+        StoreCmd::StartJob { corr, job_dir } => {
+            let result = start_job(store, job_dir, cancel.child_token()).await;
             _ = reply_tx
                 .send_async(StoreReply::StartJob { corr, result })
                 .await;
@@ -221,10 +221,10 @@ async fn handle_result(store: &mut Store, result: ItemResult) -> Result<(), Stor
 
 async fn start_job(
     store: &mut Store,
-    toml_path: PathBuf,
+    job_dir: PathBuf,
     cancel: CancellationToken,
 ) -> Result<String, JobError> {
-    let loaded = until_cancel(cancel.child_token(), LoadedManifest::load(&toml_path)).await?;
+    let loaded = until_cancel(cancel.child_token(), LoadedManifest::load(&job_dir)).await?;
 
     if until_cancel(cancel.child_token(), store.active_job())
         .await?

@@ -5,7 +5,6 @@ use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use kapella_job_info::{KapellaJob, KapellaJobResult, cap_log, stream_file_to, stream_to_file};
 use kapella_runtime_dir::{runtime_dir, staging_dir};
 use std::{
-    collections::HashSet,
     fs::File,
     io::{self, ErrorKind},
     net::SocketAddr,
@@ -106,8 +105,6 @@ async fn listen(cancel: CancellationToken, args: Args) {
 
     info!(master = %args.master, "connected");
 
-    let mut prepared_envs = HashSet::new();
-
     loop {
         let job = select! {
             _ = cancel.cancelled() => break,
@@ -139,7 +136,6 @@ async fn listen(cancel: CancellationToken, args: Args) {
         let result = match run_job(
             &job,
             &args.env_root,
-            &mut prepared_envs,
             &input_archive,
             &output_archive,
             &workdir,
@@ -187,19 +183,14 @@ async fn listen(cancel: CancellationToken, args: Args) {
 async fn run_job(
     job: &KapellaJob,
     env_root: &Path,
-    prepared_envs: &mut HashSet<String>,
     input_archive: &Path,
     output_archive: &Path,
     workdir: &Path,
 ) -> Result<KapellaJobResult, WorkerError> {
     fs::create_dir_all(workdir).await?;
 
-    let env_id = job.env.id.as_str().to_string();
-    let env_dir = env_root.join(&env_id);
-    if !prepared_envs.contains(&env_id) {
-        ensure_env(&env_dir, job).await?;
-        prepared_envs.insert(env_id);
-    }
+    let env_dir = env_root.join(job.env.id.as_str());
+    ensure_env(&env_dir, job).await?;
 
     let unpacked = {
         let archive = input_archive.to_path_buf();
@@ -226,9 +217,11 @@ async fn run_job(
         command.env(key, value);
     }
 
-    if let Ok(path) = std::env::var("PATH") {
-        command.env("PATH", format!("{}:{path}", env_dir.join("bin").display()));
-    }
+    let path = std::env::var("PATH").unwrap_or_default();
+    command.env(
+        "PATH",
+        format!("{}:{path}", env_dir.join("bin").display()),
+    );
 
     let output = command.output().await?;
     let exit_code = output.status.code().unwrap_or_default();

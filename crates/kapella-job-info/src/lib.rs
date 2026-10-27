@@ -45,7 +45,7 @@ pub struct KapellaJobResult {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum IpcRequest {
-    StartJob { toml_path: PathBuf },
+    StartJob { job_dir: PathBuf },
     AddPatterns {
         id: String,
         patterns: Vec<String>,

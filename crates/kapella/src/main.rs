@@ -26,7 +26,7 @@ async fn main() {
         });
 
     let request = match args.command {
-        ArgCommand::Start { toml } => IpcRequest::StartJob { toml_path: toml },
+        ArgCommand::Start { job } => IpcRequest::StartJob { job_dir: job },
         ArgCommand::Add { id, patterns } => IpcRequest::AddPatterns { id, patterns },
         ArgCommand::Status => IpcRequest::Status,
     };
@@ -82,16 +82,16 @@ struct Args {
 #[derive(Subcommand, Debug)]
 #[command(version, about, long_about = None)]
 enum ArgCommand {
-    /// Start a job from Kapella.toml
+    /// Start a job from a directory containing Kapella.toml
     Start {
-        /// Path to Kapella.toml
-        toml: PathBuf,
+        /// Job directory (must contain Kapella.toml)
+        job: PathBuf,
     },
     /// Add glob patterns to a running job
     Add {
         /// Job id from Kapella.toml
         id: String,
-        /// Glob patterns relative to the job toml dir
+        /// Glob patterns relative to the job directory
         patterns: Vec<String>,
     },
     /// Show queue status

@@ -100,11 +100,11 @@ async fn handle_ipc(
         };
 
         let response = match request {
-            IpcRequest::StartJob { toml_path } => {
+            IpcRequest::StartJob { job_dir } => {
                 let corr = demux.next_corr();
                 let reply_rx = demux.register(corr).await;
                 cmd_tx
-                    .send_async(StoreCmd::StartJob { corr, toml_path })
+                    .send_async(StoreCmd::StartJob { corr, job_dir })
                     .await
                     .map_err(|error| {
                         cbor2::de::Error::Io(io::Error::other(error.chain().to_string()))

@@ -12,14 +12,16 @@ pub enum ManifestError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Toml(#[from] toml::de::Error),
-    #[error("cannot resolve Kapella.toml {}", path.display())]
+    #[error("cannot resolve job directory {}", path.display())]
     Resolve {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("Kapella.toml has no parent dir")]
-    NoParentDir,
+    #[error("job path must be a directory containing Kapella.toml: {}", path.display())]
+    NotADirectory { path: PathBuf },
+    #[error("Kapella.toml not found in {}", path.display())]
+    MissingManifest { path: PathBuf },
     #[error("failed to read setup script {}", path.display())]
     ReadSetup {
         path: PathBuf,
@@ -62,18 +64,32 @@ pub struct LoadedManifest {
 }
 
 impl LoadedManifest {
-    pub async fn load(path: &Path) -> Result<Self, ManifestError> {
-        let toml_path =
-            fs::canonicalize(path)
-                .await
-                .map_err(|source| ManifestError::Resolve {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-        let toml_dir = toml_path
-            .parent()
-            .ok_or(ManifestError::NoParentDir)?
-            .to_path_buf();
+    /// Load a job from a directory that contains `Kapella.toml`.
+    pub async fn load(job_dir: &Path) -> Result<Self, ManifestError> {
+        let meta = fs::metadata(job_dir)
+            .await
+            .map_err(|source| ManifestError::Resolve {
+                path: job_dir.to_path_buf(),
+                source,
+            })?;
+        if !meta.is_dir() {
+            return Err(ManifestError::NotADirectory {
+                path: job_dir.to_path_buf(),
+            });
+        }
+
+        let toml_dir = fs::canonicalize(job_dir)
+            .await
+            .map_err(|source| ManifestError::Resolve {
+                path: job_dir.to_path_buf(),
+                source,
+            })?;
+        let toml_path = toml_dir.join("Kapella.toml");
+        if !fs::try_exists(&toml_path).await.unwrap_or(false) {
+            return Err(ManifestError::MissingManifest {
+                path: toml_dir.clone(),
+            });
+        }
 
         let raw = fs::read_to_string(&toml_path).await?;
         let manifest: KapellaManifest = toml::from_str(&raw)?;
@@ -85,14 +101,12 @@ impl LoadedManifest {
         };
         let setup_name = setup_path
             .file_name()
-            .ok_or_else(|| {
-                ManifestError::ReadSetup {
-                    path: setup_path.clone(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "setup path has no file name",
-                    ),
-                }
+            .ok_or_else(|| ManifestError::ReadSetup {
+                path: setup_path.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "setup path has no file name",
+                ),
             })?
             .to_string_lossy()
             .into_owned();
