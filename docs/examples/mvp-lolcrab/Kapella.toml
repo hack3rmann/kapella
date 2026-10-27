@@ -1,0 +1,10 @@
+id = "mvp-lolcrab"
+
+[env]
+id = "lolcrab"
+setup = "build.bash"
+
+[job]
+command = '"$KAPELLA_ENV/bin/lolcrab" --seed 1 "$KAPELLA_ITEM" > colored.txt'
+dataset = ["data/*.txt"]
+outputs = ["colored.txt"]
