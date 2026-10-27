@@ -1,3 +1,4 @@
+use kapella_runtime_dir::data_dir;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -25,5 +26,11 @@ pub fn get_default_config_path() -> PathBuf {
         }
     }
 
-    PathBuf::from("/etc/capella")
+    PathBuf::from("/etc/kapella")
 }
+
+pub fn default_store_path() -> PathBuf {
+    data_dir().join("state.db")
+}
+
+pub const DEFAULT_MUSIC_PORT: u16 = 4700;

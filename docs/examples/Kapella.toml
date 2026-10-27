@@ -1,0 +1,11 @@
+id = "render-job"
+
+[env]
+id = "render"
+setup = "setup.bash"
+variables = { FOO = "bar" }
+
+[job]
+command = './process.sh "$KAPELLA_ITEM"'
+dataset = ["data/**/*.png", "extra/*.jpg"]
+outputs = ["out.png", "meta.json"]

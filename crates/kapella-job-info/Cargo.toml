@@ -10,6 +10,5 @@ repository.workspace = true
 [dependencies]
 serde.workspace = true
 cbor2.workspace = true
-smallstr.workspace = true
-smallvec.workspace = true
-url.workspace = true
+kapella-env.workspace = true
+tokio = { workspace = true, features = ["io-util", "fs"] }

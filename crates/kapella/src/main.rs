@@ -1,27 +1,77 @@
-use cbor2::async_io::tokio::write_value;
+use cbor2::async_io::tokio::{read_value, write_value};
 use clap::{Parser, Subcommand};
-use kapella_job_info::BashCommand;
+use display_error_chain::ErrorChainExt as _;
+use kapella_job_info::{IpcRequest, IpcResponse};
 use kapella_runtime_dir::runtime_dir;
+use std::path::PathBuf;
 use tokio::net::UnixSocket;
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
+    let sock = runtime_dir().join("ipc.sock");
     let mut ipc = UnixSocket::new_stream()
-        .unwrap()
-        .connect(runtime_dir().join("ipc.sock"))
+        .unwrap_or_else(|error| {
+            panic!("failed to create unix socket: {}", error.chain());
+        })
+        .connect(&sock)
         .await
-        .unwrap();
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to connect to kapellmeister ipc socket ({}): {}",
+                sock.display(),
+                error.chain()
+            );
+        });
 
-    match args.command {
-        ArgCommand::Execute { command } => {
-            write_value(&mut ipc, &BashCommand(command)).await.unwrap();
+    let request = match args.command {
+        ArgCommand::Start { toml } => IpcRequest::StartJob { toml_path: toml },
+        ArgCommand::Add { id, patterns } => IpcRequest::AddPatterns { id, patterns },
+        ArgCommand::Status => IpcRequest::Status,
+    };
+
+    write_value(&mut ipc, &request)
+        .await
+        .unwrap_or_else(|error| {
+            panic!("failed to send ipc request: {}", error.chain());
+        });
+    let response: IpcResponse = read_value(&mut ipc).await.unwrap_or_else(|error| {
+        panic!("failed to read ipc response: {}", error.chain());
+    });
+
+    match response {
+        IpcResponse::Ok { message } => {
+            println!("{message}");
+        }
+        IpcResponse::Status {
+            pending,
+            leased,
+            done,
+            failed,
+            active_job,
+        } => {
+            let status = serde_json::json!({
+                "active_job": active_job,
+                "pending": pending,
+                "leased": leased,
+                "done": done,
+                "failed": failed,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&status).unwrap_or_else(|error| {
+                    panic!("failed to serialize status json: {}", error.chain());
+                })
+            );
+        }
+        IpcResponse::Err { message } => {
+            panic!("{message}");
         }
     }
 }
 
-/// Distributed computation orchestrator
+/// Kapella client CLI
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -32,6 +82,18 @@ struct Args {
 #[derive(Subcommand, Debug)]
 #[command(version, about, long_about = None)]
 enum ArgCommand {
-    /// Execute this string as a Bash command on a single worker
-    Execute { command: String },
+    /// Start a job from Kapella.toml
+    Start {
+        /// Path to Kapella.toml
+        toml: PathBuf,
+    },
+    /// Add glob patterns to a running job
+    Add {
+        /// Job id from Kapella.toml
+        id: String,
+        /// Glob patterns relative to the job toml dir
+        patterns: Vec<String>,
+    },
+    /// Show queue status
+    Status,
 }
