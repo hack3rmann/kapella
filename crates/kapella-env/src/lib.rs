@@ -34,4 +34,6 @@ pub struct KapellaEnv {
     pub id: KapellaEnvId,
     pub variables: HashMap<String, String>,
     pub setup: KapellaEnvSetup,
+    /// SHA-256 hex of setup body (+ watched files). Worker rebuilds env on mismatch.
+    pub fingerprint: String,
 }

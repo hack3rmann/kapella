@@ -130,6 +130,7 @@ async fn handle_music(
                     name: job.env_setup_name.clone(),
                     bash: job.env_setup.clone(),
                 },
+                fingerprint: job.env_fingerprint.clone(),
             },
             item_name,
             archive_len,

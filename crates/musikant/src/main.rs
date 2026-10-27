@@ -279,8 +279,18 @@ async fn run_job(
 
 async fn ensure_env(env_dir: &Path, job: &KapellaJob) -> Result<(), WorkerError> {
     let marker = env_dir.join(".kapella-env-ready");
+    let fingerprint = job.env.fingerprint.as_str();
+
     if marker.exists() {
-        return Ok(());
+        let current = fs::read_to_string(&marker).await.unwrap_or_default();
+        if current.trim() == fingerprint {
+            return Ok(());
+        }
+        info!(
+            env = %job.env.id.as_str(),
+            "environment fingerprint mismatch, rebuilding"
+        );
+        fs::remove_dir_all(env_dir).await?;
     }
 
     fs::create_dir_all(env_dir).await?;
@@ -302,8 +312,8 @@ async fn ensure_env(env_dir: &Path, job: &KapellaJob) -> Result<(), WorkerError>
         });
     }
 
-    fs::write(&marker, b"ok").await?;
-    info!(env = %job.env.id.as_str(), "environment ready");
+    fs::write(&marker, fingerprint.as_bytes()).await?;
+    info!(env = %job.env.id.as_str(), fingerprint, "environment ready");
     Ok(())
 }
 

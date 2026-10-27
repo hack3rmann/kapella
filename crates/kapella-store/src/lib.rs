@@ -97,6 +97,7 @@ pub struct NewJob {
     pub env_id: String,
     pub env_setup_name: String,
     pub env_setup: String,
+    pub env_fingerprint: String,
     pub env_vars: HashMap<String, String>,
     pub outputs: Vec<String>,
     pub toml_dir: PathBuf,
@@ -111,6 +112,7 @@ pub struct JobRecord {
     pub env_id: String,
     pub env_setup_name: String,
     pub env_setup: String,
+    pub env_fingerprint: String,
     pub env_vars: HashMap<String, String>,
     pub outputs: Vec<String>,
     pub toml_dir: PathBuf,
@@ -177,6 +179,7 @@ impl Store {
                 env_id TEXT NOT NULL,
                 env_setup_name TEXT NOT NULL DEFAULT 'setup.bash',
                 env_setup TEXT NOT NULL,
+                env_fingerprint TEXT NOT NULL DEFAULT '',
                 env_vars_json TEXT NOT NULL,
                 outputs_json TEXT NOT NULL,
                 toml_dir TEXT NOT NULL,
@@ -188,9 +191,14 @@ impl Store {
         )
         .execute(&mut self.conn)
         .await?;
-        // Existing DBs created before env_setup_name: add column if missing.
+        // Existing DBs: add columns if missing.
         let _ = sqlx::query(
             "ALTER TABLE jobs ADD COLUMN env_setup_name TEXT NOT NULL DEFAULT 'setup.bash'",
+        )
+        .execute(&mut self.conn)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE jobs ADD COLUMN env_fingerprint TEXT NOT NULL DEFAULT ''",
         )
         .execute(&mut self.conn)
         .await;
@@ -235,9 +243,9 @@ impl Store {
         let result = sqlx::query(
             r#"
             INSERT INTO jobs (
-                logical_id, command, env_id, env_setup_name, env_setup, env_vars_json, outputs_json,
-                toml_dir, results_root, status, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                logical_id, command, env_id, env_setup_name, env_setup, env_fingerprint,
+                env_vars_json, outputs_json, toml_dir, results_root, status, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             "#,
         )
         .bind(&job.logical_id)
@@ -245,6 +253,7 @@ impl Store {
         .bind(&job.env_id)
         .bind(&job.env_setup_name)
         .bind(&job.env_setup)
+        .bind(&job.env_fingerprint)
         .bind(serde_json::to_string(&job.env_vars)?)
         .bind(serde_json::to_string(&job.outputs)?)
         .bind(job.toml_dir.to_string_lossy().as_ref())
@@ -258,7 +267,7 @@ impl Store {
 
     pub async fn active_job(&mut self) -> Result<Option<JobRecord>> {
         self.query_job(
-            "SELECT id, logical_id, command, env_id, env_setup_name, env_setup, env_vars_json, outputs_json, toml_dir, results_root, status
+            "SELECT id, logical_id, command, env_id, env_setup_name, env_setup, env_fingerprint, env_vars_json, outputs_json, toml_dir, results_root, status
              FROM jobs WHERE status = ?1 ORDER BY id DESC LIMIT 1",
             &[JobStatus::Active.as_str()],
         )
@@ -267,7 +276,7 @@ impl Store {
 
     pub async fn active_job_by_logical_id(&mut self, logical_id: &str) -> Result<Option<JobRecord>> {
         let row = sqlx::query(
-            "SELECT id, logical_id, command, env_id, env_setup_name, env_setup, env_vars_json, outputs_json, toml_dir, results_root, status
+            "SELECT id, logical_id, command, env_id, env_setup_name, env_setup, env_fingerprint, env_vars_json, outputs_json, toml_dir, results_root, status
              FROM jobs WHERE status = ?1 AND logical_id = ?2 ORDER BY id DESC LIMIT 1",
         )
         .bind(JobStatus::Active.as_str())
@@ -289,7 +298,7 @@ impl Store {
 
     pub async fn job(&mut self, job_id: i64) -> Result<Option<JobRecord>> {
         let row = sqlx::query(
-            "SELECT id, logical_id, command, env_id, env_setup_name, env_setup, env_vars_json, outputs_json, toml_dir, results_root, status
+            "SELECT id, logical_id, command, env_id, env_setup_name, env_setup, env_fingerprint, env_vars_json, outputs_json, toml_dir, results_root, status
              FROM jobs WHERE id = ?1",
         )
         .bind(job_id)
@@ -471,6 +480,7 @@ fn job_from_row(row: &SqliteRow) -> Result<JobRecord> {
         env_id: row.try_get("env_id")?,
         env_setup_name: row.try_get("env_setup_name")?,
         env_setup: row.try_get("env_setup")?,
+        env_fingerprint: row.try_get("env_fingerprint")?,
         env_vars: serde_json::from_str(&env_vars_json)?,
         outputs: serde_json::from_str(&outputs_json)?,
         toml_dir: PathBuf::from(row.try_get::<String, _>("toml_dir")?),

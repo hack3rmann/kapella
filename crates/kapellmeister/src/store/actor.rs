@@ -258,6 +258,7 @@ async fn start_job(
             env_id: loaded.manifest.env.id.clone(),
             env_setup_name: loaded.setup_name.clone(),
             env_setup: loaded.setup_script.clone(),
+            env_fingerprint: loaded.env_fingerprint.clone(),
             env_vars: loaded.manifest.env.variables.clone(),
             outputs: loaded.manifest.job.outputs.clone(),
             toml_dir: loaded.toml_dir.clone(),

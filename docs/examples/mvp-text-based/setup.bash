@@ -8,6 +8,6 @@ set -euo pipefail
 INPUT="${1:?usage: process.sh <input>}"
 cat "$INPUT" > output.txt
 
-sleep 10s
+sleep 5s
 EOF
 chmod +x bin/process.sh
